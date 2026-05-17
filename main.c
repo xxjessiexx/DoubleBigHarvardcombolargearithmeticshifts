@@ -7,6 +7,12 @@
 #define DATA_MEMORY_SIZE 2048
 #define REGISTER_COUNT 64 //without PC and SREG
 
+#define C_FLAG 0
+#define V_FLAG 1
+#define N_FLAG 2
+#define S_FLAG 3
+#define Z_FLAG 4
+
 short int instructionMemory[INSTRUCTION_MEMORY_SIZE];
 int8_t dataMemory[DATA_MEMORY_SIZE];
 int8_t registers[REGISTER_COUNT]; //GPRs (R0-R63)
@@ -197,6 +203,51 @@ int signExtend6(int value) {
     }
     return value;
 }
+void setFlag(int flag, int value) {
+    if (value) {
+        SREG = SREG | (1 << flag);
+    } else {
+        SREG = SREG & ~(1 << flag);
+    }
+
+    // keep bits 7, 6, 5 always zero
+    SREG = SREG & 0x1F;
+}
+
+int getFlag(int flag) {
+    return (SREG >> flag) & 1;
+}
+void updateNZFlags(int8_t result) {
+    setFlag(N_FLAG, result < 0);
+    setFlag(Z_FLAG, result == 0);
+}
+void updateADDFlags(int8_t oldValue, int8_t operand, int8_t result) {
+    int unsignedSum = (oldValue & 0xFF) + (operand & 0xFF);
+    // Carry: check bit 8
+    setFlag(C_FLAG, (unsignedSum & 0x100) != 0);
+    // Overflow: same signs, result different sign
+    setFlag(V_FLAG, 
+        ((oldValue >= 0 && operand >= 0 && result < 0) ||
+         (oldValue < 0 && operand < 0 && result >= 0))
+    );
+    // Negative and Zero
+    updateNZFlags(result);
+    // Sign = N XOR V
+    setFlag(S_FLAG, getFlag(N_FLAG) ^ getFlag(V_FLAG));
+}
+void updateSUBFlags(int8_t oldValue, int8_t operand, int8_t result) {
+    // Overflow: operands have different signs, result has same sign as subtrahend
+    setFlag(V_FLAG,
+        ((oldValue >= 0 && operand < 0 && result < 0) ||
+         (oldValue < 0 && operand >= 0 && result >= 0))
+    );
+
+    // Negative and Zero
+    updateNZFlags(result);
+
+    // Sign = N XOR V
+    setFlag(S_FLAG, getFlag(N_FLAG) ^ getFlag(V_FLAG));
+}
 void executeDecodedInstruction() {
     if (!id_ex.valid) {
         printf("EXECUTE: empty\n");
@@ -209,21 +260,33 @@ void executeDecodedInstruction() {
     int instructionPC= id_ex.pc;
     int imm = signExtend6(r2OrImm);
     switch (opcode) {
-        case 0: // ADD
-            registers[r1] = registers[r1] + registers[r2OrImm];
+        case 0: { // ADD
+            int8_t oldValue = registers[r1];
+            int8_t operand = registers[r2OrImm];
+            int8_t result = oldValue + operand;
+
+            registers[r1] = result;
+            updateADDFlags(oldValue, operand, result);
+
             printf("Executed ADD: R%d = %d\n", r1, registers[r1]);
             break;
+        }
+        case 1: { // SUB
+            int8_t oldValue = registers[r1];
+            int8_t operand = registers[r2OrImm];
+            int8_t result = oldValue - operand;
 
-        case 1: // SUB
-            registers[r1] = registers[r1] - registers[r2OrImm];
+            registers[r1] = result;
+            updateSUBFlags(oldValue, operand, result);
+
             printf("Executed SUB: R%d = %d\n", r1, registers[r1]);
             break;
-
+        }
         case 2: // MUL
             registers[r1] = registers[r1] * registers[r2OrImm];
+            updateNZFlags(registers[r1]);
             printf("Executed MUL: R%d = %d\n", r1, registers[r1]);
             break;
-
         case 3: // MOVI
             registers[r1] = imm;
             printf("Executed MOVI: R%d = %d\n", r1, registers[r1]);
@@ -238,16 +301,24 @@ void executeDecodedInstruction() {
             }
             break;
 
-        case 5: // ANDI
-            registers[r1] = registers[r1] & imm;
+        case 5: { // ANDI
+            int8_t result = registers[r1] & imm;
+
+            registers[r1] = result;
+            updateNZFlags(result);
+
             printf("Executed ANDI: R%d = %d\n", r1, registers[r1]);
             break;
+        }
+        case 6: { // EOR
+            int8_t result = registers[r1] ^ registers[r2OrImm];
 
-        case 6: // EOR
-            registers[r1] = registers[r1] ^ registers[r2OrImm];
+            registers[r1] = result;
+            updateNZFlags(result);
+
             printf("Executed EOR: R%d = %d\n", r1, registers[r1]);
             break;
-
+        }
         case 7: { // BR
             uint16_t highByte = (uint8_t)registers[r1];
             uint16_t lowByte = (uint8_t)registers[r2OrImm];
@@ -258,31 +329,21 @@ void executeDecodedInstruction() {
         }
 
         case 8: { // SLC
-            int shiftAmount = r2OrImm % 8;
-            uint8_t value = (uint8_t)registers[r1];
-            uint8_t result;
-
-            if (shiftAmount == 0)
-                result = value;
-            else
-                result = (value << shiftAmount) | (value >> (8 - shiftAmount));
-
-            registers[r1] = (int8_t)result;
+            int shift = imm % 8;
+            int8_t value = registers[r1];
+            int8_t result = (value << shift) | ((value & 0xFF) >> (8 - shift));
+            registers[r1] = result;
+            updateNZFlags(result);
             printf("Executed SLC: R%d = %d\n", r1, registers[r1]);
             break;
         }
 
         case 9: { // SRC
-            int shiftAmount = r2OrImm % 8;
-            uint8_t value = (uint8_t)registers[r1];
-            uint8_t result;
-
-            if (shiftAmount == 0)
-                result = value;
-            else
-                result = (value >> shiftAmount) | (value << (8 - shiftAmount));
-
-            registers[r1] = (int8_t)result;
+            int shift = imm % 8;
+            int8_t value = registers[r1];
+            int8_t result = ((value & 0xFF) >> shift) | (value << (8 - shift));
+            registers[r1] = result;
+            updateNZFlags(result);
             printf("Executed SRC: R%d = %d\n", r1, registers[r1]);
             break;
         }
@@ -304,7 +365,19 @@ void executeDecodedInstruction() {
     }
      id_ex.valid = 0;
 }
-
+void printSREG() {
+    printf("SREG = ");
+    for (int i = 7; i >= 0; i--) {
+        printf("%d", (SREG >> i) & 1);
+    }
+    printf("\n");
+    printf("C=%d V=%d N=%d S=%d Z=%d\n",
+           getFlag(C_FLAG),
+           getFlag(V_FLAG),
+           getFlag(N_FLAG),
+           getFlag(S_FLAG),
+           getFlag(Z_FLAG));
+}
 
 void printInstructionMemory() { //non zero elements for now
     printf("\n========== Instruction Memory ==========\n");
@@ -344,62 +417,37 @@ void printRegisters() {
 }
 
 int main() {
+
     loadProgram("program.txt");
+
+    printf("\n========== Initial Instruction Memory ==========\n");
+    printInstructionMemory();
 
     int cycle = 1;
 
     while (PC < instructionCount || if_id.valid || id_ex.valid) {
-        printf("\n====================\n");
-        printf("Clock Cycle %d\n", cycle);
-        printf("====================\n");
 
-        /*
-            Important:
-            We run the stages in reverse order so that each instruction
-            spends one full cycle in each pipeline stage.
-
-            Cycle example:
-            Cycle 1: IF
-            Cycle 2: ID, IF
-            Cycle 3: EX, ID, IF
-        */
-
-        printf("\n--- Execute Stage ---\n");
+        printf("\n========================================\n");
+        printf("Clock Cycle: %d\n", cycle);
+        printf("========================================\n");
+        // Execute
         executeDecodedInstruction();
-
-        printf("\n--- Decode Stage ---\n");
-        if (if_id.valid) {
-            printf("Decoding instruction originally fetched from PC = %d: ", if_id.pc);
-            printBinary16(if_id.instruction);
-            printf("\n");
-
-            decodeInstruction();
-
-            printf("DECODE OUTPUT: opcode=%d r1=%d r2/imm=%d\n",
-                   id_ex.opcode,
-                   id_ex.r1,
-                   id_ex.r2OrImm);
-        } else {
-            printf("DECODE: empty\n");
-        }
-
-        printf("\n--- Fetch Stage ---\n");
+        // Decode
+        decodeInstruction();
+        // Fetch
         if (PC < instructionCount) {
             fetchInstruction();
-        } else {
-            printf("FETCH: empty\n");
         }
-
+        // Print SREG after every cycle
+        printSREG();
         cycle++;
     }
-
-    printf("\n====================\n");
-    printf("Program Finished\n");
-    printf("====================\n");
-
+    printf("\n========================================\n");
+    printf("PROGRAM FINISHED\n");
+    printf("========================================\n");
+    printRegisters();
+    printSREG();
     printInstructionMemory();
     printDataMemory();
-    printRegisters();
-
     return 0;
 }
