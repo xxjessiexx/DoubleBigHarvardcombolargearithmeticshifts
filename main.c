@@ -161,7 +161,14 @@ void loadProgram(char *filename) {
     printf("Program loaded successfully. Instructions count = %d\n",
            instructionCount);
 }
+int signExtend6(int value) {
+    if (value & 0x20) {
+        return value | 0xFFFFFFC0;
+    }
+    return value;
+}
 void fetchInstruction() {
+    printf("FETCH INPUT: PC before fetch = %d\n", PC);
     short int instruction = instructionMemory[PC];
     if_id.instruction=instruction;
     printf("\nFetched instruction from PC = %d : ",
@@ -169,12 +176,17 @@ void fetchInstruction() {
     PC++;
     if_id.pc=PC;
     if_id.valid=1;
+    printf("FETCH OUTPUT: IF/ID.instruction = ");
     printBinary16(instruction);
+    printf(", IF/ID.pc = %d, PC after increment = %d\n", if_id.pc, PC);
     printf("\n");
 
 }
 void decodeInstruction() {
      if (if_id.valid) {
+        printf("DECODE INPUT: IF/ID.instruction = ");
+        printBinary16(if_id.instruction);
+        printf(", IF/ID.pc = %d\n", if_id.pc-1);
         unsigned short unsignedInstruction = (unsigned short) if_id.instruction;
         id_ex.opcode = (unsignedInstruction >> 12) & 0xF;
         id_ex.r1 = (unsignedInstruction >> 6) & 0x3F;
@@ -182,14 +194,15 @@ void decodeInstruction() {
         id_ex.pc = if_id.pc;
         id_ex.valid = 1;
         if_id.valid = 0;
+        printf("DECODE OUTPUT: ID/EX.opcode=%d, ID/EX.r1=%d, ID/EX.r2OrImm=%d, signedImm=%d, ID/EX.pc=%d\n",
+               id_ex.opcode,
+               id_ex.r1,
+               id_ex.r2OrImm,
+               signExtend6(id_ex.r2OrImm),
+               id_ex.pc);
     }
 }
-int signExtend6(int value) {
-    if (value & 0x20) {
-        return value | 0xFFFFFFC0;
-    }
-    return value;
-}
+
 void setFlag(int flag, int value) {
     if (value) {
         SREG = SREG | (1 << flag);
@@ -245,6 +258,8 @@ int executeDecodedInstruction() {
     int r2OrImm = id_ex.r2OrImm;
     int instructionPC= id_ex.pc;
     int imm = signExtend6(r2OrImm);
+    printf("EXECUTE INPUT: opcode=%d, r1=%d, r2OrImm=%d, signedImm=%d, instructionPC=%d\n",
+       opcode, r1, r2OrImm, imm, instructionPC);
     switch (opcode) {
         case 0: { // ADD
             int8_t oldValue = registers[r1];
@@ -252,6 +267,7 @@ int executeDecodedInstruction() {
             int8_t result = oldValue + operand;
 
             registers[r1] = result;
+            printf("REGISTER UPDATE in EX stage: R%d changed to %d\n", r1, registers[r1]);
             updateADDFlags(oldValue, operand, result);
 
             printf("Executed ADD: R%d = %d\n", r1, registers[r1]);
@@ -263,6 +279,7 @@ int executeDecodedInstruction() {
             int8_t result = oldValue - operand;
 
             registers[r1] = result;
+            printf("REGISTER UPDATE in EX stage: R%d changed to %d\n", r1, registers[r1]);
             updateSUBFlags(oldValue, operand, result);
 
             printf("Executed SUB: R%d = %d\n", r1, registers[r1]);
@@ -270,11 +287,13 @@ int executeDecodedInstruction() {
         }
         case 2: // MUL
             registers[r1] = registers[r1] * registers[r2OrImm];
+            printf("REGISTER UPDATE in EX stage: R%d changed to %d\n", r1, registers[r1]);
             updateNZFlags(registers[r1]);
             printf("Executed MUL: R%d = %d\n", r1, registers[r1]);
             break;
         case 3: // MOVI
             registers[r1] = imm;
+            printf("REGISTER UPDATE in EX stage: R%d changed to %d\n", r1, registers[r1]);
             printf("Executed MOVI: R%d = %d\n", r1, registers[r1]);
             break;
 
@@ -283,6 +302,7 @@ int executeDecodedInstruction() {
             if (registers[r1] == 0) {
 
                 PC = instructionPC + imm;
+                printf("PC UPDATE in EX stage: PC changed to %d\n", PC);
                 flush=1;
                 printf("Executed BEQZ: branch taken, PC = %d\n", PC);
             } else {
@@ -294,6 +314,8 @@ int executeDecodedInstruction() {
             int8_t result = registers[r1] & imm;
 
             registers[r1] = result;
+            printf("REGISTER UPDATE in EX stage: R%d changed to %d\n",
+       r1, registers[r1]);
             updateNZFlags(result);
 
             printf("Executed ANDI: R%d = %d\n", r1, registers[r1]);
@@ -303,6 +325,8 @@ int executeDecodedInstruction() {
             int8_t result = registers[r1] ^ registers[r2OrImm];
 
             registers[r1] = result;
+            printf("REGISTER UPDATE in EX stage: R%d changed to %d\n",
+       r1, registers[r1]);
             updateNZFlags(result);
 
             printf("Executed EOR: R%d = %d\n", r1, registers[r1]);
@@ -313,6 +337,7 @@ int executeDecodedInstruction() {
             uint16_t lowByte = (uint8_t)registers[r2OrImm];
             flush=1;
             PC = (highByte << 8) | lowByte;
+            printf("PC UPDATE in EX stage: PC changed to %d\n", PC);
             printf("Executed BR: PC = %d\n", PC);
             break;
         }
@@ -326,6 +351,8 @@ int executeDecodedInstruction() {
             else
                 result = (value << shift) | (value >> (8 - shift));
             registers[r1] = (int8_t)result;
+            printf("REGISTER UPDATE in EX stage: R%d changed to %d\n",
+       r1, registers[r1]);
             updateNZFlags(registers[r1]);
             printf("Executed SLC: R%d = %d\n", r1, registers[r1]);
             break;
@@ -340,6 +367,8 @@ int executeDecodedInstruction() {
             else
                 result = (value >> shift) | (value << (8 - shift));
             registers[r1] = (int8_t)result;
+            printf("REGISTER UPDATE in EX stage: R%d changed to %d\n",
+       r1, registers[r1]);
             updateNZFlags(registers[r1]);
             printf("Executed SRC: R%d = %d\n", r1, registers[r1]);
             break;
@@ -347,12 +376,16 @@ int executeDecodedInstruction() {
 
         case 10: // LDR
             registers[r1] = dataMemory[r2OrImm];
+            printf("REGISTER UPDATE in EX stage: R%d changed to %d\n",
+       r1, registers[r1]);
             printf("Executed LDR: R%d = DataMemory[%d] = %d\n",
                    r1, r2OrImm, registers[r1]);
             break;
 
         case 11: // STR
             dataMemory[r2OrImm] = registers[r1];
+            printf("DATA MEMORY UPDATE in EX stage: DataMemory[%d] changed to %d\n",
+       r2OrImm, dataMemory[r2OrImm]);
             printf("Executed STR: DataMemory[%d] = %d\n",
                    r2OrImm, dataMemory[r2OrImm]);
             break;
@@ -483,20 +516,18 @@ int hasDataHazard() { //checks whether their exists data hazards or not
 
     return 0;
 }
-
-int main() {
-    loadProgram("program.txt");
-
+void simulatePipeline() {
     int cycle = 1;
+
+    PC = 0;
+    if_id.valid = 0;
+    id_ex.valid = 0;
 
     while (PC < instructionCount || if_id.valid || id_ex.valid) {
         printf("\n====================\n");
         printf("Clock Cycle %d\n", cycle);
         printf("====================\n");
 
-        /*
-            Check hazard before execute, because execute clears id_ex.valid.
-        */
         int stall = hasDataHazard();
 
         printf("\n--- Execute Stage ---\n");
@@ -533,16 +564,7 @@ int main() {
 
         printf("\n--- Decode Stage ---\n");
         if (if_id.valid) {
-            printf("Decoding instruction with stored PC = %d: ", if_id.pc);
-            printBinary16(if_id.instruction);
-            printf("\n");
-
             decodeInstruction();
-
-            printf("DECODE OUTPUT: opcode=%d r1=%d r2/imm=%d\n",
-                   id_ex.opcode,
-                   id_ex.r1,
-                   id_ex.r2OrImm);
         } else {
             printf("DECODE: empty\n");
         }
@@ -567,6 +589,10 @@ int main() {
     printDataMemory();
     printRegisters();
     printSREG();
-
+}
+int main() {
+    loadProgram("program.txt");
+    simulatePipeline();
     return 0;
+
 }
