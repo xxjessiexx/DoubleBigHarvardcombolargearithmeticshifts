@@ -3,11 +3,15 @@
 #include <string.h>
 #include <stdint.h>
 
+// uses 16-bit instruction memory and 8-bit data/registers
+#define INSTRUCTION_MEMORY_SIZE 1024
+#define DATA_MEMORY_SIZE 2048
+#define REGISTER_COUNT 64
 #define INSTRUCTION_MEMORY_SIZE 1024
 #define DATA_MEMORY_SIZE 2048
 #define REGISTER_COUNT 64 //without PC and SREG
 
-
+// SREG layout: bits 7-5 stay 0, then C V N S Z
 #define Z_FLAG 0
 #define S_FLAG 1
 #define N_FLAG 2
@@ -20,13 +24,13 @@ int8_t registers[REGISTER_COUNT]; //GPRs (R0-R63)
 int8_t SREG;
 short int PC =0 ; 
 int instructionCount = 0;
-
+// Pipeline register between fetch and decode
 typedef struct {
     short int instruction;
     short int pc;
     int valid;
 } IF_ID;
-
+// Pipeline register between decode and execute
 typedef struct {
     short int pc;
     int opcode;
@@ -37,7 +41,7 @@ typedef struct {
 
 IF_ID if_id = {0, 0, 0};
 ID_EX id_ex = { 0, 0, 0, 0, 0};
-
+// Convert instruction name to the opcode used in our ISA
 int getOpcode(char mnemonic[]) {
     if (strcmp(mnemonic, "ADD") == 0) return 0;
     if (strcmp(mnemonic, "SUB") == 0) return 1;
@@ -54,7 +58,7 @@ int getOpcode(char mnemonic[]) {
 
     return -1;
 }
-
+// Register format should be R0 to R63
 int getRegisterNumber(char reg[]) {
     if (reg[0] != 'R') {
         return -1;
@@ -65,7 +69,7 @@ int getRegisterNumber(char reg[]) {
     }
     return regNumber;
 }
-
+// Negative immediates are allowed; they are handled later using 6-bit encoding
 int getImmediateValue(char imm[]) {
     int value = atoi(imm);
     return value;
@@ -80,15 +84,15 @@ void printBinary16(short int value) {
         }
     }
 }
-
+// Build the 16-bit instruction: opcode | R1 | R2/Immediate
 short int  encodeInstruction(int opcode, int operand1, int operand2) {
     short int instruction = 0;
-    instruction = instruction | ((opcode & 0xF) << 12);
-    instruction = instruction | ((operand1 & 0x3F) << 6);
-    instruction = instruction | (operand2 & 0x3F);
+    instruction = instruction | ((opcode & 0xF) << 12); // opcode: upper 4 bits
+    instruction = instruction | ((operand1 & 0x3F) << 6); // R1: middle 6 bits
+    instruction = instruction | (operand2 & 0x3F); // R2/imm: lower 6 bits
     return instruction;
 }
-
+// Read the assembly file line by line and store encoded instructions in memory
 void loadProgram(char *filename) {
     FILE *file = fopen(filename, "r");
     if (file == NULL) {
@@ -98,6 +102,7 @@ void loadProgram(char *filename) {
     char line[100];
     int instructionIndex = 0;
     while (fgets(line, sizeof(line), file) != NULL) {
+        // Split the line into instruction name and two operands
         char *instructionName = strtok(line, " ,\t\n");
         if (instructionName == NULL) {
             continue;
@@ -121,6 +126,7 @@ void loadProgram(char *filename) {
                    instructionName);
             continue;
         }
+        // These instructions use a register as the second operand
         if (opcode == 0 || opcode == 1 || opcode == 2 || opcode == 6 || opcode == 7) {
             operand2 = getRegisterNumber(operand2String);
             if (operand2 == -1) {
@@ -129,6 +135,7 @@ void loadProgram(char *filename) {
                        instructionName);
                 continue;
             }
+            // The rest use an immediate, address, offset, or shift amount
         } else {
             operand2 = getImmediateValue(operand2String);
 
@@ -149,6 +156,7 @@ void loadProgram(char *filename) {
                        operand2);
             }
         }
+        // Store the encoded instruction only; decoding will happen later in the pipeline
         instructionMemory[instructionIndex] =
             encodeInstruction(opcode, operand1, operand2);
         printf("Loaded instruction %d: %s encoded as %d\n",
@@ -162,18 +170,22 @@ void loadProgram(char *filename) {
     printf("Program loaded successfully. Instructions count = %d\n",
            instructionCount);
 }
+// Convert 6-bit signed immediate to a normal signed int
 int signExtend6(int value) {
+    // If bit 5 is 1, the immediate is negative
     if (value & 0x20) {
         return value | 0xFFFFFFC0;
     }
     return value;
 }
+// Fetch the next instruction and place it in IF/ID
 void fetchInstruction() {
     printf("FETCH INPUT: PC before fetch = %d\n", PC);
     short int instruction = instructionMemory[PC];
     if_id.instruction=instruction;
     printf("\nFetched instruction from PC = %d : ",
            PC);
+    // Save PC before incrementing because branches need the instruction's original address
     if_id.pc=PC;
     PC++;
     if_id.valid=1;
@@ -184,17 +196,20 @@ void fetchInstruction() {
     printf("\n");
 
 }
+// Decode the instruction from IF/ID and move its fields to ID/EX
 void decodeInstruction() {
      if (if_id.valid) {
         printf("DECODE INPUT: IF/ID.instruction = ");
         printBinary16(if_id.instruction);
         printf(", IF/ID.pc = %d\n", if_id.pc);
         unsigned short unsignedInstruction = (unsigned short) if_id.instruction;
+         // Extract opcode, R1, and the last 6-bit field from the encoded instruction
         id_ex.opcode = (unsignedInstruction >> 12) & 0xF;
         id_ex.r1 = (unsignedInstruction >> 6) & 0x3F;
         id_ex.r2OrImm = unsignedInstruction & 0x3F;
         id_ex.pc = if_id.pc;
         id_ex.valid = 1;
+         // IF/ID is now empty because the instruction moved to ID/EX
         if_id.valid = 0;
        int r2 = id_ex.r2OrImm;
        int imm = signExtend6(id_ex.r2OrImm);
@@ -205,7 +220,7 @@ void decodeInstruction() {
        id_ex.opcode, id_ex.r1, id_ex.r2OrImm, imm);
     }
 }
-
+// Update one flag bit and keep unused SREG bits cleared
 void setFlag(int flag, int value) {
     if (value) {
         SREG = SREG | (1 << flag);
@@ -219,15 +234,17 @@ void setFlag(int flag, int value) {
 int getFlag(int flag) {
     return (SREG >> flag) & 1;
 }
+// N is set for negative results, Z is set for zero results
 void updateNZFlags(int8_t result) {
     setFlag(N_FLAG, result < 0);
     setFlag(Z_FLAG, result == 0);
 }
+// ADD affects C, V, N, Z, and S
 void updateADDFlags(int8_t oldValue, int8_t operand, int8_t result) {
+    // Carry is checked using unsigned 8-bit addition
     int unsignedSum = (oldValue & 0xFF) + (operand & 0xFF);
-    // Carry: check bit 8
     setFlag(C_FLAG, (unsignedSum & 0x100) != 0);
-    // Overflow: same signs, result different sign
+   // Overflow happens when same-sign operands give opposite-sign result
     setFlag(V_FLAG, 
         ((oldValue >= 0 && operand >= 0 && result < 0) ||
          (oldValue < 0 && operand < 0 && result >= 0))
@@ -237,6 +254,7 @@ void updateADDFlags(int8_t oldValue, int8_t operand, int8_t result) {
     // Sign = N XOR V
     setFlag(S_FLAG, getFlag(N_FLAG) ^ getFlag(V_FLAG));
 }
+// SUB affects V, N, Z, and S
 void updateSUBFlags(int8_t oldValue, int8_t operand, int8_t result) {
     // Overflow: operands have different signs, result has same sign as subtrahend
     setFlag(V_FLAG,
@@ -248,14 +266,16 @@ void updateSUBFlags(int8_t oldValue, int8_t operand, int8_t result) {
     // Sign = N XOR V
     setFlag(S_FLAG, getFlag(N_FLAG) ^ getFlag(V_FLAG));
 }
+// Execute the instruction currently stored in ID/EX
 int executeDecodedInstruction() {
+    // Empty execute stage, happens while pipeline is filling or draining
     if (!id_ex.valid) {
         printf("EXECUTE: empty\n");
         return 0 ;
     }
 
     int flush =0;
-
+    // Local copies make the switch cases easier to read
     int opcode=id_ex.opcode;
     int r1= id_ex.r1;
     int r2OrImm = id_ex.r2OrImm;
@@ -303,9 +323,10 @@ int executeDecodedInstruction() {
         case 4: // BEQZ
         printf("register of branch : %d", registers[r1]);
             if (registers[r1] == 0) {
-
+               // Branch target uses the saved branch PC, not the current PC
                 PC = instructionPC +1+ imm;
                 printf("PC UPDATE in EX stage: PC changed to %d\n", PC);
+                // Since PC changed, the instruction fetched after the branch may be wrong
                 flush=1;
                 printf("Executed BEQZ: branch taken, PC = %d\n", PC);
             } else {
@@ -339,6 +360,7 @@ int executeDecodedInstruction() {
             uint16_t highByte = (uint8_t)registers[r1];
             uint16_t lowByte = (uint8_t)registers[r2OrImm];
             flush=1;
+            // Build a 16-bit address from two 8-bit registers
             PC = (highByte << 8) | lowByte;
             printf("PC UPDATE in EX stage: PC changed to %d\n", PC);
             printf("Executed BR: PC = %d\n", PC);
@@ -347,6 +369,7 @@ int executeDecodedInstruction() {
 
         case 8: { // SLC
             int shift = imm % 8;
+            // Use uint8_t so the circular shift works on exactly 8 bits
             uint8_t value = (uint8_t)registers[r1];
             uint8_t result;
             if (shift == 0)
@@ -378,6 +401,7 @@ int executeDecodedInstruction() {
         }
 
         case 10: // LDR
+            // Load one byte from data memory into R1
             registers[r1] = dataMemory[r2OrImm];
             printf("REGISTER UPDATE in EX stage: R%d changed to %d\n",
        r1, registers[r1]);
@@ -386,6 +410,7 @@ int executeDecodedInstruction() {
             break;
 
         case 11: // STR
+            // Store one register value into data memory
             dataMemory[r2OrImm] = registers[r1];
             printf("DATA MEMORY UPDATE in EX stage: DataMemory[%d] changed to %d\n",
        r2OrImm, dataMemory[r2OrImm]);
@@ -396,6 +421,7 @@ int executeDecodedInstruction() {
         default:
             printf("Unknown opcode = %d\n", opcode);
     }
+    // Instruction finished execute, so ID/EX becomes empty
      id_ex.valid = 0;
      return flush;
 }
@@ -448,6 +474,7 @@ void printRegisters() {
     printf("PC = %d\n", PC);
     printf("SREG = %d\n", SREG);
 }
+// Remove the wrong-path instruction after a taken branch or BR
 void flushAfterBranchOrJump() {
     printf("FLUSH: removing wrong instruction from IF/ID\n");
 
@@ -455,6 +482,7 @@ void flushAfterBranchOrJump() {
     if_id.pc = 0;
     if_id.valid = 0;
 }
+// Returns true if this instruction writes a result to R1
 int instructionWritesToRegister(int opcode) { //return 1 if instruction writes to reg
     return opcode == 0 ||  // ADD
            opcode == 1 ||  // SUB
@@ -466,7 +494,8 @@ int instructionWritesToRegister(int opcode) { //return 1 if instruction writes t
            opcode == 9 ||  // SRC
            opcode == 10;   // LDR
 }
-int instructionReadsRegister(short int instruction, int reg) { //will teh decoded instruction read a register that will be written to in the execute 
+// Checks if the instruction needs to read a specific register
+int instructionReadsRegister(short int instruction, int reg) { 
     unsigned short u = (unsigned short) instruction;
 
     int opcode = (u >> 12) & 0xF;
@@ -496,19 +525,20 @@ int instructionReadsRegister(short int instruction, int reg) { //will teh decode
             return 0;
     }
 }
+
 int hasDataHazard() { //checks whether their exists data hazards or not 
     if (!id_ex.valid || !if_id.valid) {
         return 0;
     }
 
     int producerOpcode = id_ex.opcode;
-
-    if (!instructionWritesToRegister(producerOpcode)) { //f the instruction doesnt write on a register no hazard
+// If EX does not write to a register, there is no register hazard
+    if (!instructionWritesToRegister(producerOpcode)) { 
         return 0;
     }
 
     int destinationRegister = id_ex.r1;
-
+// If the next instruction reads the register EX will write, stall
     if (instructionReadsRegister(if_id.instruction, destinationRegister)) {
         printf("DATA HAZARD: instruction in EX writes R%d, instruction in ID needs R%d\n",
             destinationRegister,
@@ -518,18 +548,23 @@ int hasDataHazard() { //checks whether their exists data hazards or not
 
     return 0;
 }
+// Main clock-cycle loop for the 3-stage pipeline
 void simulatePipeline() {
     int cycle = 1;
     PC = 0;
     if_id.valid = 0;
     id_ex.valid = 0;
+    // Continue until no instructions are left to fetch and the pipeline is empty
     while (PC < instructionCount || if_id.valid || id_ex.valid) {
         printf("\n====================\n");
         printf("Clock Cycle %d\n", cycle);
         printf("====================\n");
+        // Check hazard before execute because execute clears ID/EX
         int stall = hasDataHazard();
         printf("\n--- Execute Stage ---\n");
+        // Run stages backwards so old pipeline registers are used first
         int flush = executeDecodedInstruction();
+        // Control hazard: flush and fetch from the new PC next cycle
         if (flush) {
             printf("\nCONTROL HAZARD: branch/jump changed PC\n");
             flushAfterBranchOrJump();
@@ -541,6 +576,7 @@ void simulatePipeline() {
             cycle++;
             continue;
         }
+        // Data hazard: let EX finish, but keep IF/ID and PC unchanged
         if (stall) {
             printf("\n--- Decode Stage ---\n");
             printf("DECODE: stalled because of data hazard\n");
@@ -555,6 +591,7 @@ void simulatePipeline() {
         }
 
         printf("\n--- Decode Stage ---\n");
+        // Normal pipeline movement: decode then fetch
         if (if_id.valid) {
             decodeInstruction();
         } else {
@@ -582,6 +619,7 @@ void simulatePipeline() {
     printRegisters();
     printSREG();
 }
+// Load program first, then start the pipeline simulation
 int main() {
     loadProgram("program.txt");
     simulatePipeline();
