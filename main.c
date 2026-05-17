@@ -440,9 +440,9 @@ void printRegisters() {
     printf("\n========== Registers ==========\n");
 
     for (int i = 0; i < REGISTER_COUNT; i++) {
-        if (registers[i] != 0) {
+     
             printf("R%d = %d\n", i, registers[i]);
-        }
+        
     }
 
     printf("PC = %d\n", PC);
