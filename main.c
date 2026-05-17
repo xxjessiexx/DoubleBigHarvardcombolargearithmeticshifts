@@ -173,9 +173,10 @@ void fetchInstruction() {
     if_id.instruction=instruction;
     printf("\nFetched instruction from PC = %d : ",
            PC);
-    PC++;
     if_id.pc=PC;
+    PC++;
     if_id.valid=1;
+    printf("\n");
     printf("FETCH OUTPUT: IF/ID.instruction = ");
     printBinary16(instruction);
     printf(", IF/ID.pc = %d, PC after increment = %d\n", if_id.pc, PC);
@@ -186,7 +187,7 @@ void decodeInstruction() {
      if (if_id.valid) {
         printf("DECODE INPUT: IF/ID.instruction = ");
         printBinary16(if_id.instruction);
-        printf(", IF/ID.pc = %d\n", if_id.pc-1);
+        printf(", IF/ID.pc = %d\n", if_id.pc);
         unsigned short unsignedInstruction = (unsigned short) if_id.instruction;
         id_ex.opcode = (unsignedInstruction >> 12) & 0xF;
         id_ex.r1 = (unsignedInstruction >> 6) & 0x3F;
@@ -301,7 +302,7 @@ int executeDecodedInstruction() {
         printf("register of branch : %d", registers[r1]);
             if (registers[r1] == 0) {
 
-                PC = instructionPC + imm;
+                PC = instructionPC +1+ imm;
                 printf("PC UPDATE in EX stage: PC changed to %d\n", PC);
                 flush=1;
                 printf("Executed BEQZ: branch taken, PC = %d\n", PC);
@@ -427,8 +428,7 @@ void printDataMemory() { //non zero elements for now
         if (dataMemory[i] != 0) {
             printf("DataMemory[%d] = %d\n",
                    i,
-                   dataMemory[i]);
-            printBinary16(instructionMemory[i]); //should be 8 as data is 8 bits 
+                   dataMemory[i]); 
             printf("\n");
         }
     }
@@ -518,37 +518,27 @@ int hasDataHazard() { //checks whether their exists data hazards or not
 }
 void simulatePipeline() {
     int cycle = 1;
-
     PC = 0;
     if_id.valid = 0;
     id_ex.valid = 0;
-
     while (PC < instructionCount || if_id.valid || id_ex.valid) {
         printf("\n====================\n");
         printf("Clock Cycle %d\n", cycle);
         printf("====================\n");
-
         int stall = hasDataHazard();
-
         printf("\n--- Execute Stage ---\n");
         int flush = executeDecodedInstruction();
-
         if (flush) {
             printf("\nCONTROL HAZARD: branch/jump changed PC\n");
             flushAfterBranchOrJump();
-
             printf("\n--- Decode Stage ---\n");
             printf("DECODE: flushed / skipped this cycle\n");
-
             printf("\n--- Fetch Stage ---\n");
             printf("FETCH: skipped this cycle, will fetch from new PC next cycle\n");
-
             printSREG();
-
             cycle++;
             continue;
         }
-
         if (stall) {
             printf("\n--- Decode Stage ---\n");
             printf("DECODE: stalled because of data hazard\n");
