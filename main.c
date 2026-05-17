@@ -7,11 +7,12 @@
 #define DATA_MEMORY_SIZE 2048
 #define REGISTER_COUNT 64 //without PC and SREG
 
-#define C_FLAG 0
-#define V_FLAG 1
+
+#define Z_FLAG 0
+#define S_FLAG 1
 #define N_FLAG 2
-#define S_FLAG 3
-#define Z_FLAG 4
+#define V_FLAG 3
+#define C_FLAG 4
 
 short int instructionMemory[INSTRUCTION_MEMORY_SIZE];
 int8_t dataMemory[DATA_MEMORY_SIZE];
