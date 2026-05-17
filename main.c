@@ -177,11 +177,11 @@ void loadProgram(char *filename) {
 void fetchInstruction() {
     short int instruction = instructionMemory[PC];
     if_id.instruction=instruction;
+    printf("\nFetched instruction from PC = %d : ",
+           PC);
     PC++;
     if_id.pc=PC;
     if_id.valid=1;
-    printf("\nFetched instruction from PC = %d : ",
-           PC);
     printBinary16(instruction);
     printf("\n");
 
@@ -248,11 +248,13 @@ void updateSUBFlags(int8_t oldValue, int8_t operand, int8_t result) {
     // Sign = N XOR V
     setFlag(S_FLAG, getFlag(N_FLAG) ^ getFlag(V_FLAG));
 }
-void executeDecodedInstruction() {
+int executeDecodedInstruction() {
     if (!id_ex.valid) {
         printf("EXECUTE: empty\n");
-        return;
+        return 0 ;
     }
+
+    int flush =0;
 
     int opcode=id_ex.opcode;
     int r1= id_ex.r1;
@@ -293,8 +295,11 @@ void executeDecodedInstruction() {
             break;
 
         case 4: // BEQZ
+        printf("register of branch : %d", registers[r1]);
             if (registers[r1] == 0) {
+
                 PC = instructionPC + imm;
+                flush=1;
                 printf("Executed BEQZ: branch taken, PC = %d\n", PC);
             } else {
                 printf("Executed BEQZ: branch not taken\n");
@@ -322,7 +327,7 @@ void executeDecodedInstruction() {
         case 7: { // BR
             uint16_t highByte = (uint8_t)registers[r1];
             uint16_t lowByte = (uint8_t)registers[r2OrImm];
-
+            flush=1;
             PC = (highByte << 8) | lowByte;
             printf("Executed BR: PC = %d\n", PC);
             break;
@@ -364,6 +369,7 @@ void executeDecodedInstruction() {
             printf("Unknown opcode = %d\n", opcode);
     }
      id_ex.valid = 0;
+     return flush;
 }
 void printSREG() {
     printf("SREG = ");
@@ -415,39 +421,79 @@ void printRegisters() {
     printf("PC = %d\n", PC);
     printf("SREG = %d\n", SREG);
 }
+void flushAfterBranchOrJump() {
+    printf("FLUSH: removing wrong instruction from IF/ID\n");
+
+    if_id.instruction = 0;
+    if_id.pc = 0;
+    if_id.valid = 0;
+}
 
 int main() {
-
     loadProgram("program.txt");
-
-    printf("\n========== Initial Instruction Memory ==========\n");
-    printInstructionMemory();
 
     int cycle = 1;
 
     while (PC < instructionCount || if_id.valid || id_ex.valid) {
+        printf("\n====================\n");
+        printf("Clock Cycle %d\n", cycle);
+        printf("====================\n");
 
-        printf("\n========================================\n");
-        printf("Clock Cycle: %d\n", cycle);
-        printf("========================================\n");
-        // Execute
-        executeDecodedInstruction();
-        // Decode
-        decodeInstruction();
-        // Fetch
+        printf("\n--- Execute Stage ---\n");
+        int flush = executeDecodedInstruction();
+
+        if (flush) {
+            printf("\nCONTROL HAZARD: branch/jump changed PC\n");
+            flushAfterBranchOrJump();
+
+            printf("\n--- Decode Stage ---\n");
+            printf("DECODE: flushed / skipped this cycle\n");
+
+            printf("\n--- Fetch Stage ---\n");
+            printf("FETCH: skipped this cycle, will fetch from new PC next cycle\n");
+
+            printSREG();
+
+            cycle++;
+            continue;
+        }
+
+        printf("\n--- Decode Stage ---\n");
+        if (if_id.valid) {
+            printf("Decoding instruction with stored PC = %d: ", if_id.pc);
+            printBinary16(if_id.instruction);
+            printf("\n");
+
+            decodeInstruction();
+
+            printf("DECODE OUTPUT: opcode=%d r1=%d r2/imm=%d\n",
+                   id_ex.opcode,
+                   id_ex.r1,
+                   id_ex.r2OrImm);
+        } else {
+            printf("DECODE: empty\n");
+        }
+
+        printf("\n--- Fetch Stage ---\n");
         if (PC < instructionCount) {
             fetchInstruction();
+        } else {
+            printf("FETCH: empty\n");
         }
-        // Print SREG after every cycle
+
         printSREG();
+
         cycle++;
     }
-    printf("\n========================================\n");
-    printf("PROGRAM FINISHED\n");
-    printf("========================================\n");
-    printRegisters();
-    printSREG();
+
+    printf("\n====================\n");
+    printf("Program Finished\n");
+    printf("====================\n");
+
     printInstructionMemory();
     printDataMemory();
+    printRegisters();
+    printSREG();
+
     return 0;
 }
