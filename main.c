@@ -196,12 +196,13 @@ void decodeInstruction() {
         id_ex.pc = if_id.pc;
         id_ex.valid = 1;
         if_id.valid = 0;
-        printf("DECODE OUTPUT: ID/EX.opcode=%d, ID/EX.r1=%d, ID/EX.r2OrImm=%d, signedImm=%d, ID/EX.pc=%d\n",
-               id_ex.opcode,
-               id_ex.r1,
-               id_ex.r2OrImm,
-               signExtend6(id_ex.r2OrImm),
-               id_ex.pc);
+       int r2 = id_ex.r2OrImm;
+       int imm = signExtend6(id_ex.r2OrImm);
+
+    printf("DECODE OUTPUT:\n");
+    printf("R-format: opcode=%d, R1=%d, R2=%d\n", id_ex.opcode, id_ex.r1, r2);
+    printf("I-format: opcode=%d, R1=%d, IMM(raw)=%d, IMM(signed)=%d\n",
+       id_ex.opcode, id_ex.r1, id_ex.r2OrImm, imm);
     }
 }
 
