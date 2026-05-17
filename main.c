@@ -420,15 +420,84 @@ void flushAfterBranchOrJump() {
     if_id.pc = 0;
     if_id.valid = 0;
 }
+int instructionWritesToRegister(int opcode) { //return 1 if instruction writes to reg
+    return opcode == 0 ||  // ADD
+           opcode == 1 ||  // SUB
+           opcode == 2 ||  // MUL
+           opcode == 3 ||  // MOVI
+           opcode == 5 ||  // ANDI
+           opcode == 6 ||  // EOR
+           opcode == 8 ||  // SLC
+           opcode == 9 ||  // SRC
+           opcode == 10;   // LDR
+}
+int instructionReadsRegister(short int instruction, int reg) { //will teh decoded instruction read a register that will be written to in the execute 
+    unsigned short u = (unsigned short) instruction;
+
+    int opcode = (u >> 12) & 0xF;
+    int r1 = (u >> 6) & 0x3F;
+    int r2OrImm = u & 0x3F;
+
+    switch (opcode) {
+        case 0: // ADD R1 R2
+        case 1: // SUB R1 R2
+        case 2: // MUL R1 R2
+        case 6: // EOR R1 R2
+        case 7: // BR R1 R2
+            return r1 == reg || r2OrImm == reg;
+
+        case 4:  // BEQZ R1 IMM
+        case 5:  // ANDI R1 IMM
+        case 8:  // SLC R1 IMM
+        case 9:  // SRC R1 IMM
+        case 11: // STR R1 ADDRESS
+            return r1 == reg;
+
+        case 3:  // MOVI R1 IMM
+        case 10: // LDR R1 ADDRESS
+            return 0;
+
+        default:
+            return 0;
+    }
+}
+int hasDataHazard() { //checks whether their exists data hazards or not 
+    if (!id_ex.valid || !if_id.valid) {
+        return 0;
+    }
+
+    int producerOpcode = id_ex.opcode;
+
+    if (!instructionWritesToRegister(producerOpcode)) { //f the instruction doesnt write on a register no hazard
+        return 0;
+    }
+
+    int destinationRegister = id_ex.r1;
+
+    if (instructionReadsRegister(if_id.instruction, destinationRegister)) {
+        printf("DATA HAZARD: instruction in EX writes R%d, instruction in ID needs R%d\n",
+            destinationRegister,
+            destinationRegister);
+        return 1;
+    }
+
+    return 0;
+}
 
 int main() {
     loadProgram("program.txt");
 
     int cycle = 1;
+
     while (PC < instructionCount || if_id.valid || id_ex.valid) {
         printf("\n====================\n");
         printf("Clock Cycle %d\n", cycle);
         printf("====================\n");
+
+        /*
+            Check hazard before execute, because execute clears id_ex.valid.
+        */
+        int stall = hasDataHazard();
 
         printf("\n--- Execute Stage ---\n");
         int flush = executeDecodedInstruction();
@@ -442,6 +511,19 @@ int main() {
 
             printf("\n--- Fetch Stage ---\n");
             printf("FETCH: skipped this cycle, will fetch from new PC next cycle\n");
+
+            printSREG();
+
+            cycle++;
+            continue;
+        }
+
+        if (stall) {
+            printf("\n--- Decode Stage ---\n");
+            printf("DECODE: stalled because of data hazard\n");
+
+            printf("\n--- Fetch Stage ---\n");
+            printf("FETCH: stalled, PC stays the same\n");
 
             printSREG();
 
