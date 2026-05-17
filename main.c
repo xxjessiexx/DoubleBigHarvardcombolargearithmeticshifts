@@ -55,7 +55,6 @@ int getOpcode(char mnemonic[]) {
 }
 
 int getRegisterNumber(char reg[]) {
-
     if (reg[0] != 'R') {
         return -1;
     }
@@ -70,6 +69,7 @@ int getImmediateValue(char imm[]) {
     int value = atoi(imm);
     return value;
 }
+
 void printBinary16(short int value) {
     unsigned short instruction = (unsigned short) value;
     for (int i = 15; i >= 0; i--) {
@@ -79,6 +79,7 @@ void printBinary16(short int value) {
         }
     }
 }
+
 short int  encodeInstruction(int opcode, int operand1, int operand2) {
     short int instruction = 0;
     instruction = instruction | ((opcode & 0xF) << 12);
@@ -86,6 +87,7 @@ short int  encodeInstruction(int opcode, int operand1, int operand2) {
     instruction = instruction | (operand2 & 0x3F);
     return instruction;
 }
+
 void loadProgram(char *filename) {
     FILE *file = fopen(filename, "r");
     if (file == NULL) {
@@ -95,36 +97,29 @@ void loadProgram(char *filename) {
     char line[100];
     int instructionIndex = 0;
     while (fgets(line, sizeof(line), file) != NULL) {
-
         char *instructionName = strtok(line, " ,\t\n");
         if (instructionName == NULL) {
             continue;
         }
         char *operand1String = strtok(NULL, " ,\t\n");
         char *operand2String = strtok(NULL, " ,\t\n");
-
         if (operand1String == NULL || operand2String == NULL) {
             printf("Error: missing operand in instruction %s\n", instructionName);
             continue;
         }
-
         int opcode = getOpcode(instructionName);
-
         if (opcode == -1) {
             printf("Error: unknown instruction %s\n", instructionName);
             continue;
         }
-
         int operand1 = getRegisterNumber(operand1String);
         int operand2;
-
         if (operand1 == -1) {
             printf("Error: invalid first operand %s in instruction %s\n",
                    operand1String,
                    instructionName);
             continue;
         }
-
         if (opcode == 0 || opcode == 1 || opcode == 2 || opcode == 6 || opcode == 7) {
             operand2 = getRegisterNumber(operand2String);
             if (operand2 == -1) {
@@ -141,36 +136,28 @@ void loadProgram(char *filename) {
                        instructionName);
                 continue;
             }
-
             if (opcode != 8 && opcode != 9 && opcode != 10 && opcode != 11) {
                 if (operand2 < -32 || operand2 > 31) {
                     printf("Warning: immediate %d is outside signed 6-bit range (-32 to 31)\n",
                            operand2);
                 }
             }
-
             if ((opcode == 8 || opcode == 9 || opcode == 10 || opcode == 11) &&
                 (operand2 < 0 || operand2 > 63)) {
                 printf("Warning: operand %d may not fit in 6 bits (0 to 63)\n",
                        operand2);
             }
         }
-
         instructionMemory[instructionIndex] =
             encodeInstruction(opcode, operand1, operand2);
-
         printf("Loaded instruction %d: %s encoded as %d\n",
                instructionIndex,
                instructionName,
                instructionMemory[instructionIndex]);
-
         instructionIndex++;
     }
-
     fclose(file);
-
     instructionCount = instructionIndex;
-
     printf("Program loaded successfully. Instructions count = %d\n",
            instructionCount);
 }
@@ -209,7 +196,6 @@ void setFlag(int flag, int value) {
     } else {
         SREG = SREG & ~(1 << flag);
     }
-
     // keep bits 7, 6, 5 always zero
     SREG = SREG & 0x1F;
 }
@@ -241,10 +227,8 @@ void updateSUBFlags(int8_t oldValue, int8_t operand, int8_t result) {
         ((oldValue >= 0 && operand < 0 && result < 0) ||
          (oldValue < 0 && operand >= 0 && result >= 0))
     );
-
     // Negative and Zero
     updateNZFlags(result);
-
     // Sign = N XOR V
     setFlag(S_FLAG, getFlag(N_FLAG) ^ getFlag(V_FLAG));
 }
@@ -335,20 +319,28 @@ int executeDecodedInstruction() {
 
         case 8: { // SLC
             int shift = imm % 8;
-            int8_t value = registers[r1];
-            int8_t result = (value << shift) | ((value & 0xFF) >> (8 - shift));
-            registers[r1] = result;
-            updateNZFlags(result);
+            uint8_t value = (uint8_t)registers[r1];
+            uint8_t result;
+            if (shift == 0)
+                result = value;
+            else
+                result = (value << shift) | (value >> (8 - shift));
+            registers[r1] = (int8_t)result;
+            updateNZFlags(registers[r1]);
             printf("Executed SLC: R%d = %d\n", r1, registers[r1]);
             break;
         }
 
         case 9: { // SRC
             int shift = imm % 8;
-            int8_t value = registers[r1];
-            int8_t result = ((value & 0xFF) >> shift) | (value << (8 - shift));
-            registers[r1] = result;
-            updateNZFlags(result);
+            uint8_t value = (uint8_t)registers[r1];
+            uint8_t result;
+            if (shift == 0)
+                result = value;
+            else
+                result = (value >> shift) | (value << (8 - shift));
+            registers[r1] = (int8_t)result;
+            updateNZFlags(registers[r1]);
             printf("Executed SRC: R%d = %d\n", r1, registers[r1]);
             break;
         }
@@ -403,7 +395,7 @@ void printDataMemory() { //non zero elements for now
             printf("DataMemory[%d] = %d\n",
                    i,
                    dataMemory[i]);
-            printBinary16(instructionMemory[i]);
+            printBinary16(instructionMemory[i]); //should be 8 as data is 8 bits 
             printf("\n");
         }
     }
@@ -433,7 +425,6 @@ int main() {
     loadProgram("program.txt");
 
     int cycle = 1;
-
     while (PC < instructionCount || if_id.valid || id_ex.valid) {
         printf("\n====================\n");
         printf("Clock Cycle %d\n", cycle);
