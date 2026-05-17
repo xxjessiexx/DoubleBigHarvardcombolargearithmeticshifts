@@ -11,7 +11,9 @@
 #define DATA_MEMORY_SIZE 2048
 #define REGISTER_COUNT 64 //without PC and SREG
 
-// SREG layout: bits 7-5 stay 0, then C V N S Z
+
+// SREG bits: 7 6 5 4 3 2 1 0
+//            0 0 0 C V N S Z
 #define Z_FLAG 0
 #define S_FLAG 1
 #define N_FLAG 2
