@@ -35,11 +35,13 @@ typedef struct {
     int opcode;
     int r1;
     int r2OrImm;
+    int8_t r1Value;
+    int8_t r2Value;
     int valid;
 } ID_EX;
 
 IF_ID if_id = {0, 0, 0};
-ID_EX id_ex = { 0, 0, 0, 0, 0};
+ID_EX id_ex = {0, 0, 0, 0, 0, 0, 0};
 // Convert instruction name to the opcode used in our ISA
 int getOpcode(char mnemonic[]) {
     if (strcmp(mnemonic, "ADD") == 0) return 0;
@@ -208,6 +210,21 @@ void decodeInstruction() {
         id_ex.r2OrImm = unsignedInstruction & 0x3F;
         id_ex.pc = if_id.pc;
         id_ex.valid = 1;
+        id_ex.r1Value = registers[id_ex.r1];
+
+        if (id_ex.opcode == 0 || id_ex.opcode == 1 || id_ex.opcode == 2 ||
+            id_ex.opcode == 6 || id_ex.opcode == 7) {
+            id_ex.r2Value = registers[id_ex.r2OrImm];
+            printf("DECODE REGISTER READS: R%d value=%d, R%d value=%d\n",
+                id_ex.r1, id_ex.r1Value,
+                id_ex.r2OrImm, id_ex.r2Value);
+        } else {
+            id_ex.r2Value = 0;
+            printf("DECODE REGISTER READS: R%d value=%d, immediate/address/raw=%d\n",
+                id_ex.r1, id_ex.r1Value,
+                id_ex.r2OrImm);
+        }
+        
          // IF/ID is now empty because the instruction moved to ID/EX
         if_id.valid = 0;
        int r2 = id_ex.r2OrImm;
@@ -280,12 +297,14 @@ int executeDecodedInstruction() {
     int r2OrImm = id_ex.r2OrImm;
     int instructionPC= id_ex.pc;
     int imm = signExtend6(r2OrImm);
+    int8_t r1Value = id_ex.r1Value;
+    int8_t r2Value = id_ex.r2Value;
     printf("EXECUTE INPUT: opcode=%d, r1=%d, r2OrImm=%d, signedImm=%d, instructionPC=%d\n",
        opcode, r1, r2OrImm, imm, instructionPC);
     switch (opcode) {
         case 0: { // ADD
-            int8_t oldValue = registers[r1];
-            int8_t operand = registers[r2OrImm];
+            int8_t oldValue = r1Value;
+            int8_t operand = r2Value;
             int8_t result = oldValue + operand;
 
             registers[r1] = result;
@@ -296,8 +315,8 @@ int executeDecodedInstruction() {
             break;
         }
         case 1: { // SUB
-            int8_t oldValue = registers[r1];
-            int8_t operand = registers[r2OrImm];
+            int8_t oldValue = r1Value;
+            int8_t operand = r2Value;
             int8_t result = oldValue - operand;
 
             registers[r1] = result;
@@ -308,7 +327,7 @@ int executeDecodedInstruction() {
             break;
         }
         case 2: // MUL
-            registers[r1] = registers[r1] * registers[r2OrImm];
+            registers[r1] = r1Value * r2Value;
             printf("REGISTER UPDATE in EX stage: R%d changed to %d\n", r1, registers[r1]);
             updateNZFlags(registers[r1]);
             printf("Executed MUL: R%d = %d\n", r1, registers[r1]);
@@ -320,8 +339,8 @@ int executeDecodedInstruction() {
             break;
 
         case 4: // BEQZ
-        printf("register of branch : %d", registers[r1]);
-            if (registers[r1] == 0) {
+        printf("register of branch : %d", r1Value);
+            if (r1Value == 0) {
                // Branch target uses the saved branch PC, not the current PC
                 PC = instructionPC +1+ imm;
                 printf("PC UPDATE in EX stage: PC changed to %d\n", PC);
@@ -334,7 +353,7 @@ int executeDecodedInstruction() {
             break;
 
         case 5: { // ANDI
-            int8_t result = registers[r1] & imm;
+            int8_t result = r1Value & imm;
 
             registers[r1] = result;
             printf("REGISTER UPDATE in EX stage: R%d changed to %d\n",
@@ -345,7 +364,7 @@ int executeDecodedInstruction() {
             break;
         }
         case 6: { // EOR
-            int8_t result = registers[r1] ^ registers[r2OrImm];
+            int8_t result = r1Value ^ r2Value;
 
             registers[r1] = result;
             printf("REGISTER UPDATE in EX stage: R%d changed to %d\n",
@@ -356,8 +375,8 @@ int executeDecodedInstruction() {
             break;
         }
         case 7: { // BR
-            uint16_t highByte = (uint8_t)registers[r1];
-            uint16_t lowByte = (uint8_t)registers[r2OrImm];
+            uint16_t highByte = (uint8_t)r1Value;
+            uint16_t lowByte = (uint8_t)r2Value;
             flush=1;
             // Build a 16-bit address from two 8-bit registers
             PC = (highByte << 8) | lowByte;
@@ -369,7 +388,7 @@ int executeDecodedInstruction() {
         case 8: { // SLC
             int shift = r2OrImm % 8;
             // Use uint8_t so the circular shift works on exactly 8 bits
-            uint8_t value = (uint8_t)registers[r1];
+            uint8_t value = (uint8_t)r1Value;
             uint8_t result;
             if (shift == 0)
                 result = value;
@@ -385,7 +404,7 @@ int executeDecodedInstruction() {
 
         case 9: { // SRC
             int shift = r2OrImm % 8;
-            uint8_t value = (uint8_t)registers[r1];
+            uint8_t value = (uint8_t)r1Value;
             uint8_t result;
             if (shift == 0)
                 result = value;
@@ -410,7 +429,7 @@ int executeDecodedInstruction() {
 
         case 11: // STR
             // Store one register value into data memory
-            dataMemory[r2OrImm] = registers[r1];
+            dataMemory[r2OrImm] = r1Value;
             printf("DATA MEMORY UPDATE in EX stage: DataMemory[%d] changed to %d\n",
        r2OrImm, dataMemory[r2OrImm]);
             printf("Executed STR: DataMemory[%d] = %d\n",
