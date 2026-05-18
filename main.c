@@ -367,7 +367,7 @@ int executeDecodedInstruction() {
         }
 
         case 8: { // SLC
-            int shift = imm % 8;
+            int shift = r2OrImm % 8;
             // Use uint8_t so the circular shift works on exactly 8 bits
             uint8_t value = (uint8_t)registers[r1];
             uint8_t result;
@@ -384,7 +384,7 @@ int executeDecodedInstruction() {
         }
 
         case 9: { // SRC
-            int shift = imm % 8;
+            int shift = r2OrImm % 8;
             uint8_t value = (uint8_t)registers[r1];
             uint8_t result;
             if (shift == 0)
