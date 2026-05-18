@@ -6,9 +6,6 @@
 // uses 16-bit instruction memory and 8-bit data/registers
 #define INSTRUCTION_MEMORY_SIZE 1024
 #define DATA_MEMORY_SIZE 2048
-#define REGISTER_COUNT 64
-#define INSTRUCTION_MEMORY_SIZE 1024
-#define DATA_MEMORY_SIZE 2048
 #define REGISTER_COUNT 64 //without PC and SREG
 
 
